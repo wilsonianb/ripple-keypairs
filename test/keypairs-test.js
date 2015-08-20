@@ -2,23 +2,26 @@
 
 const codec = require('ripple-address-codec');
 const assert = require('assert-diff');
+const _ = require('lodash');
+const fs = require('fs');
+
 const utils = require('../src/utils');
 const keypairs = require('../src');
-const _ = require('lodash');
+const secp256k1Module = require('../src/secp256k1');
+const {K256Pair} = secp256k1Module;
+const {KeyType} = require('../src/keypair');
+const {Ed25519Pair} = require('../src/ed25519');
 
 const {
-  KeyType,
-  K256Pair,
-  seedFromPhrase,
-  Ed25519Pair,
   keyPairFromSeed,
-  generateWallet,
-  walletFromSeed,
-  walletFromPhrase,
-  generateValidatorKeys,
-  validatorKeysFromSeed,
-  validatorKeysFromPhrase,
-  nodePublicAccountID
+  keyFromPublic,
+  generateAccountKeys,
+  accountKeysFromSeed,
+  accountKeysFromPhrase,
+  generateNodeKeys,
+  nodeKeysFromSeed,
+  nodeKeysFromPhrase,
+  deriveNodeOwnerAccountID
 } = keypairs;
 
 const {SerializedObject} = require('ripple-lib');
@@ -44,39 +47,61 @@ const FIXTURES = {
   }
 };
 
-describe('ED25519Pair', function() {
+function numberOfTests({whenCI, always}) {
+  return process.env.CI ? whenCI : always;
+}
+
+function loadFixtureJSON(name) {
+  const fixturesFile = __dirname + '/fixtures/' + name;
+  return JSON.parse(fs.readFileSync(fixturesFile).toString());
+}
+
+describe('ed25519', function() {
   let pair;
 
   before(function() {
-    pair = Ed25519Pair.fromSeed(seedFromPhrase('niq'));
+    pair = Ed25519Pair.fromPhrase('niq');
   });
 
-  it('can be constructed from a pulbic key to verify a txn', function() {
+  it('can be constructed from a public key to verify a txn', function() {
     const sig = pair.sign(FIXTURES.message);
-    const key = Ed25519Pair.fromPublic(pair.pubKeyCanonicalBytes());
+    const key = Ed25519Pair.fromPublic(pair.publicBytes());
     assert(key.verify(FIXTURES.message, sig));
     assert(!key.verify(FIXTURES.message.concat(0), sig));
   });
 
+  it('can be serve as the work horse for the `verify` method', function() {
+    const sig = pair.sign(FIXTURES.message);
+    const key = Ed25519Pair.fromPublic(pair.publicBytes());
+    assert(key.verify(FIXTURES.message, sig));
+    assert(!key.verify(FIXTURES.message.concat(0), sig));
+  });
+
+  it('can be used from a secret key to resign a txn', function() {
+    const sig = pair.sign(FIXTURES.message);
+    const key2 = Ed25519Pair.fromPrivate(pair.privateBytes());
+    assert.deepEqual(key2.sign(FIXTURES.message), sig);
+  });
+
   it('has a String member `type` equal to KeyPair.ed25519 constant',
       function() {
-    assert.equal(pair.type, KeyType.ed25519);
+    assert.equal(pair.type(), KeyType.ed25519);
   });
 
   it('has a public key representation beginning with ED', function() {
-    const pub_hex = pair.pubKeyHex();
+    const pub_hex = pair.publicHex();
     assert(pub_hex.length === 66);
     assert(pub_hex.slice(0, 2) === 'ED');
   });
   it('derives the same keypair for a given passphrase as rippled', function() {
-    const pub_hex = pair.pubKeyHex();
+    const pub_hex = pair.publicHex();
     const target_hex = 'EDD3993CDC6647896C455F136648B7750' +
                    '723B011475547AF60691AA3D7438E021D';
     assert.equal(pub_hex, target_hex);
   });
   it('generates the same account_id as rippled for a given keypair',
       function() {
-    assert.equal(pair.accountID(),
+    assert.equal(pair.id(),
                  'rJZdUusLDtY9NEsGea7ijqhVrXv98rYBYN');
   });
   it('creates signatures that are a function of secret/message', function() {
@@ -95,93 +120,119 @@ describe('ED25519Pair', function() {
 describe('keyPairFromSeed', function() {
   it('returns an Ed25519Pair from an ed25519 seed', function() {
     const pair = keyPairFromSeed('sEdTM1uX8pu2do5XvTnutH6HsouMaM2');
-    assert(pair instanceof Ed25519Pair);
+    assert.equal(pair.type(), KeyType.ed25519);
   });
   it('returns a K256Pair from an secp256k1 (default) seed', function() {
     const pair = keyPairFromSeed('sn259rEFXrQrWyx3Q7XneWcwV6dfL');
-    assert(pair instanceof K256Pair);
+    assert.equal(pair.type(), KeyType.secp256k1);
   });
   it('can be intantiated with an array of bytes', function() {
     const seed = 'sn259rEFXrQrWyx3Q7XneWcwV6dfL';
     const {bytes} = codec.decodeSeed(seed);
     const pair = keyPairFromSeed(bytes);
-    assert(pair instanceof K256Pair);
+    assert.equal(pair.type(), KeyType.secp256k1);
+    assert.equal(pair.seed(), seed);
+  });
+  it('can be intantiated with a Buffer', function() {
+    const seed = 'sn259rEFXrQrWyx3Q7XneWcwV6dfL';
+    const {bytes} = codec.decodeSeed(seed);
+    const pair = keyPairFromSeed(new Buffer(bytes));
+    assert.equal(pair.type(), KeyType.secp256k1);
+    assert.equal(pair.seed(), seed);
+  });
+  it('can be intantiated with a Uint8Array', function() {
+    const seed = 'sn259rEFXrQrWyx3Q7XneWcwV6dfL';
+    const {bytes} = codec.decodeSeed(seed);
+    const pair = keyPairFromSeed(new Uint8Array(bytes));
+    assert.equal(pair.type(), KeyType.secp256k1);
     assert.equal(pair.seed(), seed);
   });
 });
 
-describe('walletFromPhrase', function() {
+describe('accountKeysFromPhrase', function() {
   it('can gan generate ed25519 wallets', function() {
     const expected = {
       seed: 'sEd7rBGm5kxzauRTAV2hbsNz7N45X91',
-      accountID: 'rJZdUusLDtY9NEsGea7ijqhVrXv98rYBYN',
+      id: 'rJZdUusLDtY9NEsGea7ijqhVrXv98rYBYN',
+      // privateKey:
+      //   'ED' +
+      //     'C99B2B037295A6A0F8DBFEA341ED1FC5A7BE6882D7E8DC287C2F4498B87A933A',
       publicKey:
         'ED' +
         'D3993CDC6647896C455F136648B7750723B011475547AF60691AA3D7438E021D'
     };
-    const wallet = walletFromPhrase('niq', 'ed25519');
+    const wallet = accountKeysFromPhrase('niq', 'ed25519');
     assert.deepEqual(wallet, expected);
   });
   it('generates secp256k1 wallets by default', function() {
     const expected = {
       seed: 'shQUG1pmPYrcnSUGeuJFJTA1b3JSL',
-      accountID: 'rNvfq2SVbCiio1zkN5WwLQW8CHgy2dUoQi',
+      id: 'rNvfq2SVbCiio1zkN5WwLQW8CHgy2dUoQi',
+      // privateKey:
+      //   '00' +
+      //   '152E883D92D57814CC0B4E00C1449F153BF59965C78F5ADE7E0B15B3EDE3915C',
       publicKey:
         '02' +
         '1E788CDEB9104C9179C3869250A89999C1AFF92D2C3FF7925A1696835EA3D840'
     };
-    const wallet = walletFromPhrase('niq');
+    const wallet = accountKeysFromPhrase('niq');
     assert.deepEqual(wallet, expected);
   });
 });
 
-describe('validatorKeysFromPhrase', function() {
-  it('generates keys used by peer nodes/validators', function() {
+describe('nodeKeysFromPhrase', function() {
+  it('generates keys used by node nodes/nodes', function() {
     const expected = {
       seed: 'shQUG1pmPYrcnSUGeuJFJTA1b3JSL',
-      publicKey: 'n9KNees3ippJvi7ZT1GqHMCmEmmkCVPxQRPfU5tPzmg9MtWevpjP'
+      publicKey: 'n9KNees3ippJvi7ZT1GqHMCmEmmkCVPxQRPfU5tPzmg9MtWevpjP',
+      id: '6D8805BD760097BA2E696EAAC4A1195A61F09DB7'
+      // privateKey:
+      //   '00' +
+      //   '90959EDC6D5C97941CA33F37E60C1AE9CD5098137D7029443E56377D9E37CE3C'
     };
-    const wallet = validatorKeysFromPhrase('niq');
+    const wallet = nodeKeysFromPhrase('niq');
     assert.deepEqual(wallet, expected);
   });
 });
 
-describe('generateWallet', function() {
-  function random(len) {
-    return _.fill(Array(len), 0);
-  }
+describe('generateAccountKeys', function() {
+  const entropy = _.fill(Array(16), 0);
 
   it('can generate ed25519 wallets', function() {
     const expected = {
       seed: 'sEdSJHS4oiAdz7w2X2ni1gFiqtbJHqE',
-      accountID: 'r9zRhGr7b6xPekLvT6wP4qNdWMryaumZS7',
+      id: 'r9zRhGr7b6xPekLvT6wP4qNdWMryaumZS7',
+      // privateKey:
+      //   'ED' +
+      //     '0B6CBAC838DFE7F47EA1BD0DF00EC282FDF45510C92161072CCFB84035390C4D',
       publicKey:
         'ED' +
         '1A7C082846CFF58FF9A892BA4BA2593151CCF1DBA59F37714CC9ED39824AF85F'
     };
-    const actual = generateWallet({type: 'ed25519', random});
+    const actual = generateAccountKeys({type: 'ed25519', entropy});
     assert.deepEqual(actual, expected);
-    assert.deepEqual(walletFromSeed(actual.seed), expected);
+    assert.deepEqual(accountKeysFromSeed(actual.seed), expected);
   });
   it('can generate secp256k1 wallets (by default)', function() {
     const expected = {
       seed: 'sp6JS7f14BuwFY8Mw6bTtLKWauoUs',
-      accountID: 'rGCkuB7PBr5tNy68tPEABEtcdno4hE6Y7f',
+      id: 'rGCkuB7PBr5tNy68tPEABEtcdno4hE6Y7f',
+      // privateKey:
+      //   '00' +
+      //   '2512BBDFDBB77510883B7DCCBEF270B86DEAC8B64AC762873D75A1BEE6298665',
       publicKey:
         '03' +
         '90A196799EE412284A5D80BF78C3E84CBB80E1437A0AECD9ADF94D7FEAAFA284'
     };
-    const actual = generateWallet({type: undefined, random});
+    const actual = generateAccountKeys({type: undefined, entropy});
     assert.deepEqual(actual, expected);
-    assert.deepEqual(walletFromSeed(actual.seed), expected);
+    assert.deepEqual(accountKeysFromSeed(actual.seed), expected);
   });
 });
 
-describe('generateValidatorKeys', function() {
-  function random(len) {
-    return _.fill(Array(len), 0);
-  }
-  it('can generate secp256k1 validator keys', function() {
+describe('generateNodeKeys', function() {
+  const entropy = _.fill(Array(16), 0);
+  it('can generate secp256k1 node keys', function() {
     /*
     rippled validation_create 00000000000000000000000000000000
     {
@@ -196,44 +247,74 @@ describe('generateValidatorKeys', function() {
     */
     const expected = {
       seed: 'sp6JS7f14BuwFY8Mw6bTtLKWauoUs',
-      publicKey: 'n9LPxYzbDpWBZ1bC3J3Fdkgqoa3FEhVKCnS8yKp7RFQFwuvd8Q2c'
+      publicKey: 'n9LPxYzbDpWBZ1bC3J3Fdkgqoa3FEhVKCnS8yKp7RFQFwuvd8Q2c',
+      id: '74757BB8E839482E2151E542F20B42E532D09119'
+      // privateKey:
+      //   '00' +
+      //   'D296B892B3A7964BD0CC882FC7C0BE948B6BBD8EB1EFF8C13942FCAABF1F3877'
     };
-    const actual = generateValidatorKeys({random});
+    const actual = generateNodeKeys({entropy});
     assert.deepEqual(actual, expected);
-    assert.deepEqual(validatorKeysFromSeed(actual.seed), expected);
+    assert.deepEqual(nodeKeysFromSeed(actual.seed), expected);
   });
 
-  it('can generate the correct accountID from validator public key', () => {
+  it('can generate the correct accountID from node public key', () => {
     const accountID = 'rhcfR9Cg98qCxHpCcPBmMonbDBXo84wyTn';
-    const validatorPublic =
+    const nodePublic =
           'n9MXXueo837zYH36DvMc13BwHcqtfAWNJY5czWVbp7uYTj7x17TH';
-    assert.equal(nodePublicAccountID(validatorPublic), accountID);
+    assert.equal(deriveNodeOwnerAccountID(nodePublic), accountID);
   });
 });
 
-describe('K256Pair', function() {
-  describe('generated tests', function() {
-    /* eslint-disable max-len */
-    const expected = [
-      '30440220312B2E0894B81A2E070ACE566C5DFC70CDD18E67D44E2CFEF2EB5495F7DE2DAC02205E155C0019502948C265209DFDD7D84C4A05BD2C38CEE6ECD7C33E9C9B12BEC2',
-      '304402202A5860A12C15EBB8E91AA83F8E19D85D4AC05B272FC0C4083519339A7A76F2B802200852F9889E1284CF407DC7F73D646E62044C5AB432EAEF3FFF3F6F8EE9A0F24C',
-      '3045022100B1658C88D1860D9F8BEB25B79B3E5137BBC2C382D08FE7A068FFC6AB8978C8040220644F64B97EA144EE7D5CCB71C2372DD730FA0A659E4C18241A80D6C915350263',
-      '3045022100F3E541330FF79FFC42EB0491EDE1E47106D94ECFE3CDB2D9DD3BC0E8861F6D45022013F62942DD626D6C9731E317F372EC5C1F72885C4727FDBEE9D9321BC530D7B2',
-      '3045022100998ABE378F4119D8BEE9843482C09F0D5CE5C6012921548182454C610C57A269022036BD8EB71235C4B2C67339DE6A59746B1F7E5975987B7AB99B313D124A69BB9F'
-    ];
-    /* eslint-enable max-len */
-    const key = K256Pair.fromSeed(seedFromPhrase('niq'));
+describe('secp256k1', function() {
+  function makeTests({useSpeedUp}) {
+    function withSpeed(func) {
+      return function() {
+        secp256k1Module.useSpeedUp = useSpeedUp;
+        func.apply(this, arguments);
+      };
+    }
+
+    const expected = loadFixtureJSON('secp256k1-sigs.json');
+    const key = K256Pair.fromPhrase('niq');
+
     function test_factory(i) {
-      it('can deterministically sign/verify message [' + i + ']', function() {
-        const message = [i];
-        const sig = key.sign(message);
-        assert.equal(utils.bytesToHex(sig), expected[i]);
-        assert(key.verify(message, sig));
+      describe('message [' + i + ']', function() {
+        let message, sig;
+
+        before(withSpeed(function() {
+          message = [i];
+          assert.equal(secp256k1Module.useSpeedUp, useSpeedUp);
+          sig = key.sign(message);
+        }));
+
+        it('can deterministically sign/verify', withSpeed(function() {
+          if (expected[i]) {
+            assert.equal(utils.bytesToHex(sig), expected[i]);
+          }
+          assert(key.verify(message, sig));
+        }));
+        it('can sign again using prederived key', withSpeed(function() {
+          const key2 = K256Pair.fromPrivate(key.privateBytes());
+          assert.deepEqual(key2.sign(message), sig);
+        }));
+        it('can verify with just a public key', withSpeed(function() {
+          const key2 = keyFromPublic(key.publicBytes());
+          assert(key2.verify(message, sig));
+          assert(!key2.verify(message.concat(0), sig));
+        }));
       });
     }
 
-    for (let n = 0; n < 5; n++) {
+    const numTests = numberOfTests({whenCI: expected.length, always: 10});
+    for (let n = 0; n < numTests; n++) {
       test_factory(n);
     }
+  }
+  describe('generated tests (speedup)', function() {
+    makeTests({useSpeedUp: true});
+  });
+  describe('generated tests (elliptic)', function() {
+    makeTests({useSpeedUp: false});
   });
 });

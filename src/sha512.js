@@ -4,6 +4,9 @@ const hashjs = require('hash.js');
 const BigNum = require('bn.js');
 
 module.exports = class Sha512 {
+  static half(bytes) {
+    return new this().add(bytes).first256();
+  }
   constructor() {
     this.hash = hashjs.sha512();
   }

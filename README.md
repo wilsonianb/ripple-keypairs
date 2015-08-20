@@ -4,44 +4,40 @@ An implementation of ripple keypairs & wallet generation using
 [elliptic](https://github.com/indutny/elliptic) which supports rfc6979 and
 eddsa deterministic signatures.
 
-## Generate a random wallet
+## Generate random account keys
 ```js
-> var generateWallet = require('ripple-keypairs').generateWallet;
-> generateWallet({type: 'ed25519'});
-{ seed: 'sEd7t79mzn2dwy3vvpvRmaaLbLhvme6',
-  accountID: 'r9LqNeG6qHxjeUocjvVki2XR35weJ9mZgQ',
-  publicKey: 'ED5F5AC8B98974A3CA843326D9B88CEBD0560177B973EE0B149F782CFAA06DC66A' }
+> require('ripple-keypairs').generateAccountKeys()
+{ seed: 'sh9g1aeTESY5W4ZvNmHDKJCurrCqJ',
+  publicKey: '034C48914136FCF21CB5B25C2227ADD08D622A5E74ACCEC456E2E51241DA7E165B',
+  id: 'rLd8vAKQXYCyZajqXHY5LzR7fLEoTGno5k' }
 ```
 
-## Derive a wallet from a seed
+## Derive account keys from a seed
 ```js
-> var walletFromSeed = require('ripple-keypairs').walletFromSeed;
-> walletFromSeed('sEd7t79mzn2dwy3vvpvRmaaLbLhvme6');
+> require('ripple-keypairs').accountKeysFromSeed('sEd7t79mzn2dwy3vvpvRmaaLbLhvme6');
 { seed: 'sEd7t79mzn2dwy3vvpvRmaaLbLhvme6',
-  accountID: 'r9LqNeG6qHxjeUocjvVki2XR35weJ9mZgQ',
-  publicKey: 'ED5F5AC8B98974A3CA843326D9B88CEBD0560177B973EE0B149F782CFAA06DC66A' }')
+  publicKey: 'ED5F5AC8B98974A3CA843326D9B88CEBD0560177B973EE0B149F782CFAA06DC66A',
+  id: 'r9LqNeG6qHxjeUocjvVki2XR35weJ9mZgQ' }
 ```
 
-## Generate random validator keys
+## Generate random node keys
 ```js
-> var generateValidatorKeys = require('ripple-keypairs').generateValidatorKeys;
-> generateValidatorKeys();
+> require('ripple-keypairs').generateNodeKeys();
 { seed: 'ssC7Y9LMKhuzFMVueaj2fnTuGLftA',
   publicKey: 'n9MU2RsULUayZnWeLssjbMzVRPeVUUMgiPYTwe8eMgpdGDWp5t8C' }
 ```
 
-## Derive validator keys from a seed
+## Derive node keys from a seed
 ```js
-> var validatorKeysFromSeed = require('ripple-keypairs').validatorKeysFromSeed;
-> validatorKeysFromSeed('ssC7Y9LMKhuzFMVueaj2fnTuGLftA');
+> require('ripple-keypairs').nodeKeysFromSeed('ssC7Y9LMKhuzFMVueaj2fnTuGLftA');
 { seed: 'ssC7Y9LMKhuzFMVueaj2fnTuGLftA',
   publicKey: 'n9MU2RsULUayZnWeLssjbMzVRPeVUUMgiPYTwe8eMgpdGDWp5t8C' }
 ```
 
-## Derive accountID matching a validator public key (aka public generator)
+## Derive accountID matching a node public key (aka public generator)
 ```js
-> var nodePublicAccountID = require('ripple-keypairs').nodePublicAccountID;
-> nodePublicAccountID('n9MXXueo837zYH36DvMc13BwHcqtfAWNJY5czWVbp7uYTj7x17TH')
+> var deriveNodeOwnerAccountID = require('ripple-keypairs').deriveNodeOwnerAccountID;
+> deriveNodeOwnerAccountID('n9MXXueo837zYH36DvMc13BwHcqtfAWNJY5czWVbp7uYTj7x17TH')
 'rhcfR9Cg98qCxHpCcPBmMonbDBXo84wyTn'
 ```
 
@@ -66,7 +62,7 @@ function signTxJson(seed, json) {
   var tx = Transaction.from_json(json);
   var tx_json = tx.tx_json;
 
-  tx_json.SigningPubKey = keyPair.pubKeyHex();
+  tx_json.SigningPubKey = keyPair.publicHex();
   tx_json.TxnSignature = keyPair.signHex(signingData(tx));
 
   var serialized = tx.serialize();
