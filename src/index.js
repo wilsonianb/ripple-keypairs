@@ -100,6 +100,13 @@ function deriveAddress(publicKey) {
   return deriveAddressFromBytes(hexToBytes(publicKey));
 }
 
+function deriveNodePublic(seed) {
+  const decoded = addressCodec.decodeSeed(seed);
+  const algorithm = decoded.type === 'ed25519' ? 'ed25519' : 'ecdsa-secp256k1';
+  const keypair = select(algorithm).deriveKeypair(decoded.bytes, {validator: true});
+  return addressCodec.encodeNodePublic(hexToBytes(keypair.publicKey));
+}
+
 function deriveNodeAddress(publicKey) {
   const generatorBytes = addressCodec.decodeNodePublic(publicKey);
   const accountPublicBytes = accountPublicFromPublicGenerator(generatorBytes);
@@ -112,5 +119,6 @@ module.exports = {
   sign,
   verify,
   deriveAddress,
+  deriveNodePublic,
   deriveNodeAddress
 };

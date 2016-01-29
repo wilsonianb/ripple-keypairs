@@ -32,6 +32,11 @@ deriveAddress(publicKey: string) -> string
 Derive a Ripple address from a public key.
 
 ```
+deriveNodePublic(seed: string) -> string
+```
+Derive a node public key from a seed.
+
+```
 deriveNodeAddress(publicKey: string) -> string
 ```
 Derive a node address from a public key.

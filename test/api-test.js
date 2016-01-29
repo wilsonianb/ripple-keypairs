@@ -83,6 +83,11 @@ describe('api', () => {
     assert(api.verify(messageHex, signature, publicKey));
   });
 
+  it('deriveNodePublic', () => {
+    const nodePublic = api.deriveNodePublic(fixtures.secp256k1.seed);
+    assert.strictEqual(nodePublic, fixtures.secp256k1.nodePublic);
+  });
+
   it('deriveNodeAddress', () => {
     const x = 'n9KHn8NfbBsZV5q8bLfS72XyGqwFt5mgoPbcTV4c6qKiuPTAtXYk';
     const y = 'rU7bM9ENDkybaxNrefAVjdLTyNLuue1KaJ';
