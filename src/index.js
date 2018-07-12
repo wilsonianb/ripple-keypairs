@@ -10,6 +10,7 @@ const addressCodec = require('ripple-address-codec')
 const derivePrivateKey = require('./secp256k1').derivePrivateKey
 const accountPublicFromPublicGenerator = require('./secp256k1')
   .accountPublicFromPublicGenerator
+const musig = require('./musig')
 const utils = require('./utils')
 const hexToBytes = utils.hexToBytes
 const bytesToHex = utils.bytesToHex
@@ -114,11 +115,68 @@ function deriveNodeAddress(publicKey) {
   return deriveAddressFromBytes(accountPublicBytes)
 }
 
+function getL(publicKeys) {
+  let pubKeysBytes = []
+  for (let publicKey of publicKeys) {
+    pubKeysBytes.push(hexToBytes(publicKey).slice(1))
+  }
+
+  return musig.getL(pubKeysBytes)
+}
+
+function getAggregatePublicKey(L, publicKeys) {
+  let pubKeysBytes = []
+  for (let publicKey of publicKeys) {
+    pubKeysBytes.push(hexToBytes(publicKey).slice(1))
+  }
+
+  const prefix = 'ED'
+
+  return prefix + bytesToHex(
+    musig.getAggregatePublicKey(L, pubKeysBytes))
+}
+
+function getR(Rs) {
+  let RsBytes = []
+  for (let Ri of Rs) {
+    RsBytes.push(hexToBytes(Ri).slice(1))
+  }
+
+  const prefix = 'ED'
+  return prefix + bytesToHex(musig.getR(RsBytes))
+}
+
+function musigSign(messageHex, privateKey, ephemeralPrivate, aggPublicKey, L, aggEphemeralPublic) {
+  return bytesToHex(musig.sign(
+      hexToBytes(messageHex),
+      hexToBytes(privateKey).slice(1),
+      hexToBytes(ephemeralPrivate).slice(1),
+      hexToBytes(aggPublicKey).slice(1), L,
+      hexToBytes(aggEphemeralPublic).slice(1)).toBytes())
+}
+
+function combine(signatures, aggEphemeralPublic) {
+  let signaturesBytes = []
+  for (let sig of signatures) {
+    signaturesBytes.push(hexToBytes(sig))
+  }
+
+  return bytesToHex(musig.combine(
+    signaturesBytes, hexToBytes(aggEphemeralPublic).slice(1)).toBytes())
+}
+
 module.exports = {
   generateSeed,
   deriveKeypair,
   sign,
   verify,
   deriveAddress,
-  deriveNodeAddress
+  deriveNodeAddress,
+  musig: {
+    getL,
+    getAggregatePublicKey,
+    getR,
+    sign: musigSign,
+    combine
+  }
 }
